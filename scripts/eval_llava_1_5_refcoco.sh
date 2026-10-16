@@ -133,7 +133,7 @@ export HF_HUB_OFFLINE=1
 export HF_DATASETS_OFFLINE=1
 export LMMS_EVAL_DATASETS_CACHE="/scratch/rohhs/huggingface/datasets"
 
-export QA_ID="PruneSID_llava_k${K}_refcoco_refcocoplus_refcocog_pixel_nuwa"
+export QA_ID="PruneSID_llava_k${K}_${TASKS//,/_}_pixel_nuwa"
 
 NUM_MACHINES=${SLURM_NNODES}
 NUM_PROCESSES=$((GPUS_PER_NODE * NUM_MACHINES))
