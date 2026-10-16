@@ -27,6 +27,77 @@ try:
 except ImportError:
     eval_logger.warning("Failed to import qwen_vl_utils; Please install it via `pip install qwen-vl-utils`")
 
+import re
+import os
+import json
+import hashlib
+import glob
+
+def load_json_with_fallback(file_path):
+    # First: try normal JSON loading
+    try:
+        with open(file_path, "r") as f:
+            return json.load(f)
+    except json.JSONDecodeError as e:
+        print(f"Warning: invalid JSON in {file_path}")
+        print(f"JSON error: {e}")
+        print("Attempting to recover valid key/value pairs...")
+    # Fallback: recover valid "key": value pairs
+    data = {}
+    # Match lines containing a valid JSON string key followed by a value.
+    pattern = re.compile(r'^\s*"((?:\\.|[^"\\])*)"\s*:\s*(.*?)(?:,\s*)?$')
+    with open(file_path, "r") as f:
+        for line_number, line in enumerate(f, 1):
+            match = pattern.match(line)
+            if not match:
+                continue
+            key = match.group(1)
+            value_str = match.group(2).strip()
+            try:
+                # Decode the JSON key properly
+                key = json.loads(f'"{key}"')
+                # Decode the value
+                value = json.loads(value_str)
+                data[key] = value
+            except json.JSONDecodeError:
+                # Invalid key/value -> discard it
+                continue
+    print(f"Recovered {len(data)} valid key/value pairs.")
+    return data
+
+def merge_qa_dicts(qa_dir, QA_ID=None):
+    if QA_ID is None:
+        QA_ID = str(os.getenv("QA_ID", 0))
+    pattern = os.path.join(qa_dir, f"qa_{QA_ID}_*.json")
+    merged = {}
+    for file_path in glob.glob(pattern):
+        print(
+            f"{50*'='}\n"
+            f"Loading... {file_path}\n"
+            f"{50*'='}"
+        )
+        data = load_json_with_fallback(file_path)
+        merged.update(data)
+    return merged
+
+
+def save_json_file(file_path, data):
+    with open(file_path, "w") as file:
+        json.dump(data, file, indent=4)
+
+
+def image_to_key(img):
+    img_array = np.array(img)
+    return hashlib.sha256(img_array.tobytes()).hexdigest()
+
+
+def format_time(seconds):
+    """Convert seconds to HH:MM:SS string."""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
 
 @register_model("qwen2_5_vl")
 class Qwen2_5_VL(lmms):
@@ -73,6 +144,10 @@ class Qwen2_5_VL(lmms):
         else:
             self._device = torch.device(device)
             self.device_map = device_map if device_map else device
+
+        print(f"self.device_map: {self.device_map}")
+        self.RANK = int(self.device_map.split(":")[-1])
+        print(f"self.RANK: {self.RANK}")
 
         if use_flash_attention_2:
             self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
@@ -177,6 +252,17 @@ class Qwen2_5_VL(lmms):
             f"{50*'='}"
         )
 
+        qa = {}
+        default_save_dir = os.path.join(os.getenv("SAVE_LOGS_DIR"), 'eval_logs', 'question_answer_pairs')
+        os.makedirs(default_save_dir, exist_ok=True)
+        QA_ID = str(os.getenv('QA_ID', 0))
+        RANK = self.RANK
+        if not int(os.getenv("LOCAL", 0)):
+            qa = merge_qa_dicts(default_save_dir, QA_ID)
+            print(f"RANK: {RANK} - reading {len(qa)} qa pairs")
+        file_path = os.path.join(default_save_dir, f"qa_{QA_ID}_{RANK}.json")
+        print(f"RANK: {RANK} - os.path.exists(file_path): {os.path.exists(file_path)}")
+
         res = []
 
         def _collate(x):
@@ -189,18 +275,40 @@ class Qwen2_5_VL(lmms):
             toks = self.tokenizer.encode(x[0])
             return -len(toks), x[0]
 
-        pbar = tqdm(total=len(requests), disable=(self.rank != 0), desc="Model Responding")
+        # pbar = tqdm(total=len(requests), disable=(self.rank != 0), desc="Model Responding")
         # we group requests by their generation_kwargs,
         # so that we don't try to execute e.g. greedy sampling and temp=0.8 sampling
         # in the same batch.
         re_ords = utils.Collator([reg.args for reg in requests], _collate, grouping=True)
         chunks = re_ords.get_batched(n=self.batch_size, batch_fn=None)
+        iter = 0
+        num_iters = len(requests)
+
         for chunk in chunks:
             contexts, all_gen_kwargs, doc_to_visual, doc_id, task, split = zip(*chunk)
             task = task[0]
             split = split[0]
             visual_list = [doc_to_visual[0](self.task_dict[task][split][ids]) for ids in doc_id]
             gen_kwargs = all_gen_kwargs[0]
+
+            img_key = ''
+            doc_id = doc_id[0]
+            sample = self.task_dict[task][split][doc_id]
+            if 'filename' in sample:
+                try:
+                    img_key = self.task_dict[task][split][doc_id]['file_name']
+                except:
+                    img_key = image_to_key(visual_list[0])
+            elif isinstance(visual_list, list) and visual_list != []:
+                img_key = image_to_key(visual_list[0])
+            else:
+                img_key = image_to_key(visual_list)
+            request_key = contexts[0].replace(" ", "_") + "_" + str(doc_id) + "_" + img_key
+
+            if request_key in qa.keys():
+                res.append(qa[request_key])
+                iter += 1
+                continue
 
             # Set default until or update values from gen_kwargs if present
             until = gen_kwargs.get("until", [self.tokenizer.decode(self.eot_token_id)])
@@ -325,14 +433,22 @@ class Qwen2_5_VL(lmms):
                         ans = ans.split(term)[0]
                 answers[i] = ans
 
+            qa[request_key] = answers[0]
+            save_json_file(file_path, qa)
+
             for ans, context in zip(answers, contexts):
                 res.append(ans)
                 self.cache_hook.add_partial("generate_until", (context, gen_kwargs), ans)
-                pbar.update(1)
+
+            if iter % 200 == 0:
+                print(f"RANK: {RANK} - [{iter}/{num_iters}] Model Responding..., output: {answers[0]}")
+            iter += 1
+
+                # pbar.update(1)
             # reorder this group of results back to original unsorted form
         res = re_ords.get_original(res)
 
-        pbar.close()
+        # pbar.close()
         return res
 
     def generate_until_multi_round(self, requests) -> List[str]:
