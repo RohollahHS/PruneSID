@@ -2,13 +2,14 @@
 set -x
 
 # Check if SLURM_JOB_NAME contains "interactive" or "debug"
-if [[ "$SLURM_JOB_NAME" == *interactive* || "$SLURM_JOB_NAME" == *debug* ]]; then
-    export REMOTE_DEBUG=1
-else
-    export REMOTE_DEBUG=0
-fi
+# if [[ "$SLURM_JOB_NAME" == *interactive* || "$SLURM_JOB_NAME" == *debug* ]]; then
+#     export REMOTE_DEBUG=1
+# else
+#     export REMOTE_DEBUG=0
+# fi
 
 # export REMOTE_DEBUG=0
+export REMOTE_DEBUG=0
 echo "REMOTE_DEBUG: $REMOTE_DEBUG"
 
 START_TIME_LOCAL=$(date +%s)
@@ -71,9 +72,9 @@ module purge all
 module load StdEnv/2023 gcc/12.3
 module load cuda/12.6
 module load java
-source ${VENVS_DIR}/voco/bin/activate
+source ${VENVS_DIR}/qwen/bin/activate
 
-K="64"
+K="128"
 TASKS=refcoco,refcoco+,refcocog
 OPTIONAL_ARGS=""
 
@@ -106,14 +107,14 @@ LMMS_ROOT="${REPO_ROOT}/lmms-eval"
 
 NPROC="${NPROC:-4}"
 PORT="${PORT:-29641}"
-MODEL="Qwen/Qwen2-VL-7B-Instruct"
+MODEL="Qwen/Qwen2.5-VL-7B-Instruct"
 
 export BBOX_COORD_FORMAT=pixel
 export REFCOCO_PROMPT_STYLE=nuwa
 
 export PYTHONPATH="${REPO_ROOT}:${LMMS_ROOT}:${PYTHONPATH:-}"
 
-echo "[PruneSID] Qwen/Qwen2-VL-7B-Instruct | tasks=${TASKS} | K=${K}"
+echo "[PruneSID] Qwen/Qwen2.5-VL-7B-Instruct | tasks=${TASKS} | K=${K}"
 cd "${LMMS_ROOT}"
 
 OUTPUT_DIR=${SCRATCH}/projects/voco_llava
@@ -134,17 +135,7 @@ MAIN_PROCESS_IP=$(scontrol show hostnames "$SLURM_NODELIST" | head -n 1)
 MAIN_PROCESS_PORT=29500
 MACHINE_RANK=${SLURM_NODEID}
 
-accelerate launch --num_processes=${GPUS_PER_NODE} -m lmms_eval \
-  --model lqwen2_vla \
-  --model_args pretrained=Qwen/Qwen2-VL-7B-Instruct,max_pixels=2359296 \
-  --plug_in_model prunesid_qwen2 \
-  --need_token_num $K \
-  --tasks ${TASKS} \
-  --batch_size 1 \
-  --log_samples \
-  --log_samples_suffix pruneSID \
-  --output_path ${SAVE_LOGS_DIR} \
-  ${OPTIONAL_ARGS}
+accelerate launch --num_processes=${GPUS_PER_NODE} -m lmms_eval --model qwen2_5_vl --model_args pretrained=Qwen/Qwen2.5-VL-7B-Instruct,max_pixels=2359296 --plug_in_model prunesid_qwen2 --need_token_num $K --tasks ${TASKS} --batch_size 1 --log_samples --log_samples_suffix pruneSID --output_path ${SAVE_LOGS_DIR} ${OPTIONAL_ARGS}
 
 
 ################ SBATCH
