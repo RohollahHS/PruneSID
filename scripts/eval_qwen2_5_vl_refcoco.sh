@@ -135,7 +135,7 @@ MAIN_PROCESS_IP=$(scontrol show hostnames "$SLURM_NODELIST" | head -n 1)
 MAIN_PROCESS_PORT=29500
 MACHINE_RANK=${SLURM_NODEID}
 
-accelerate launch --num_processes=${GPUS_PER_NODE} -m lmms_eval --model qwen2_5_vl --model_args pretrained=Qwen/Qwen2.5-VL-7B-Instruct,max_pixels=2359296 --plug_in_model prunesid_qwen2 --need_token_num $K --tasks ${TASKS} --batch_size 1 --log_samples --log_samples_suffix pruneSID --output_path ${SAVE_LOGS_DIR} ${OPTIONAL_ARGS}
+accelerate launch --num_processes=${GPUS_PER_NODE} -m lmms_eval --model qwen2_5_vl --model_args pretrained=Qwen/Qwen2.5-VL-7B-Instruct,max_pixels=12845056 --plug_in_model prunesid_qwen2_5 --need_token_num $K --tasks ${TASKS} --batch_size 1 --log_samples --log_samples_suffix pruneSID --output_path ${SAVE_LOGS_DIR} ${OPTIONAL_ARGS}
 
 
 ################ SBATCH

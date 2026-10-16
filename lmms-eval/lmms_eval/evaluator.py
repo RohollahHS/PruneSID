@@ -190,6 +190,9 @@ def simple_evaluate(
     elif cli_args.plug_in_model == "prunesid_qwen2":
         from prunesid.prunesid_qwen import prunesid_qwen2
         lm._model = prunesid_qwen2(lm._model, cli_args.need_token_num)
+    elif cli_args.plug_in_model == "prunesid_qwen2_5":
+        from prunesid.prunesid_qwen import prunesid_qwen2_5_vl
+        lm._model = prunesid_qwen2_5_vl(lm._model, cli_args.need_token_num)
     # helper function to recursively apply config overrides to leaf subtasks, skipping their constituent groups.
     # (setting of num_fewshot ; bypassing metric calculation ; setting fewshot seed)
     def _adjust_config(task_dict):
