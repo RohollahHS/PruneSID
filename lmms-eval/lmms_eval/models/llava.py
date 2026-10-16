@@ -155,6 +155,10 @@ class Llava(lmms):
         else:
             self._device = torch.device(f"cuda:{accelerator.local_process_index}")
             self.device_map = f"cuda:{accelerator.local_process_index}"
+        
+        print(f"self.device_map: {self.device_map}")
+        self.RANK = int(self.device_map.split(":")[-1])
+        print(f"self.RANK: {self.RANK}")
 
         llava_model_args = {
             "multimodal": True,
@@ -360,6 +364,17 @@ class Llava(lmms):
         return new_list
 
     def generate_until(self, requests: List[Instance]) -> List[str]:
+        qa = {}
+        default_save_dir = os.path.join(os.getenv("SAVE_LOGS_DIR"), 'eval_logs', 'question_answer_pairs')
+        os.makedirs(default_save_dir, exist_ok=True)
+        QA_ID = str(os.getenv('QA_ID', 0))
+        RANK = self.RANK
+        if not int(os.getenv("LOCAL", 0)):
+            qa = merge_qa_dicts(default_save_dir, QA_ID)
+            print(f"RANK: {RANK} - reading {len(qa)} qa pairs")
+        file_path = os.path.join(default_save_dir, f"qa_{QA_ID}_{RANK}.json")
+        print(f"RANK: {RANK} - os.path.exists(file_path): {os.path.exists(file_path)}")
+
         res = []
 
         def _collate(x):
@@ -378,7 +393,8 @@ class Llava(lmms):
         re_ords = utils.Collator([reg.args for reg in requests], _collate, grouping=True)
         chunks = re_ords.get_batched(n=self.batch_size, batch_fn=None)
         num_iters = len(requests) // self.batch_size if len(requests) % self.batch_size == 0 else len(requests) // self.batch_size + 1
-        pbar = tqdm(total=num_iters, disable=(self.rank != 0), desc="Model Responding")
+        # pbar = tqdm(total=num_iters, disable=(self.rank != 0), desc="Model Responding")
+        iter = 0
         for chunk in chunks:
             contexts, all_gen_kwargs, doc_to_visual, doc_id, task, split = zip(*chunk)
             task = task[0]
@@ -388,6 +404,17 @@ class Llava(lmms):
             # we assume all gen kwargs in the batch are the same
             # this is safe to assume because the `grouper` object ensures it.
             gen_kwargs = all_gen_kwargs[0]
+
+            if flattened_visuals:
+                img_key = image_to_key(flattened_visuals[0])
+            else:
+                img_key = str(doc_id[0])
+            request_key = contexts[0].replace(" ", "_") + "_" + img_key
+
+            if request_key in qa.keys():
+                res.append(qa[request_key])
+                iter += 1
+                continue
 
             # Set default values for until and max_new_tokens
             until = [self.tok_decode(self.eot_token_id)]
@@ -492,13 +519,21 @@ class Llava(lmms):
             #             # ignore '' separator,
             #             # for seq2seq case where self.tok_decode(self.eot_token_id) = ''
             #             text_outputs = text_outputs.split(term)[0]
+            qa[request_key] = text_outputs[0]
+            save_json_file(file_path, qa)
+
             res.extend(text_outputs)
             self.cache_hook.add_partial("generate_until", (context, gen_kwargs), text_outputs)
-            pbar.update(1)
+
+            if iter % 200 == 0:
+                print(f"RANK: {RANK} - [{iter}/{num_iters}] Model Responding..., output: {text_outputs}")
+            iter += 1
+
+            # pbar.update(1)
             # reorder this group of results back to original unsorted form
         res = re_ords.get_original(res)
 
-        pbar.close()
+        # pbar.close()
         return res
 
     def generate_until_multi_round(self, requests) -> List[str]:
