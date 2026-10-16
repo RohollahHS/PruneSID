@@ -141,13 +141,17 @@ class Qwen2_5_VL(lmms):
         if accelerator.num_processes > 1:
             self._device = torch.device(f"cuda:{accelerator.local_process_index}")
             self.device_map = f"cuda:{accelerator.local_process_index}"
+
+            print(f"self.device_map: {self.device_map}")
+            self.RANK = int(self.device_map.split(":")[-1])
+            print(f"self.RANK: {self.RANK}")
         else:
             self._device = torch.device(device)
             self.device_map = device_map if device_map else device
 
-        print(f"self.device_map: {self.device_map}")
-        self.RANK = int(self.device_map.split(":")[-1])
-        print(f"self.RANK: {self.RANK}")
+            print(f"self.device_map: {self.device_map}")
+            self.RANK = 0
+            print(f"self.RANK: {self.RANK}")
 
         if use_flash_attention_2:
             self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
