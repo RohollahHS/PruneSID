@@ -135,52 +135,26 @@ class Llava(lmms):
         conv_template="vicuna_v1",
         use_cache=True,
         tie_weights: bool = True,
-        truncate_context=False,
+        truncate_context=False,  # whether to truncate the context in generation, set it False for LLaVA-1.6
         customized_config=None,  # ends in json
-        prune: bool = False,
-        prune_k_total: int = 32,
-        prune_anchor_k: int = 5,
-        prune_adaptive_rel: Optional[bool] = None,
-        prune_tau: Optional[float] = None,
-        prune_patience: Optional[int] = None,
-        prune_patience_mode: Optional[str] = None,
-        prune_kmin_abs: Optional[int] = None,
-        prune_kmax_ratio: Optional[float] = None,
         **kwargs,
     ) -> None:
         super().__init__()
-        use_flash_attention_2 = kwargs.pop("use_flash_attention_2", None)
+        # Do not use kwargs for now
         assert kwargs == {}, f"Unexpected kwargs: {kwargs}"
 
-        env_world_size = int(os.environ.get("WORLD_SIZE", "1"))
-        env_local_rank = int(os.environ.get("LOCAL_RANK", "0"))
-        use_internal_accelerator = env_world_size <= 1
-
-        if use_internal_accelerator:
-            accelerator_kwargs = InitProcessGroupKwargs(timeout=timedelta(weeks=52))
-            accelerator = Accelerator(kwargs_handlers=[accelerator_kwargs])
-            self.accelerator = accelerator
-            if accelerator is not None and accelerator.num_processes > 1:
-                self._device = torch.device(f"cuda:{accelerator.local_process_index}")
-                self.device_map = f"cuda:{accelerator.local_process_index}"
-            elif accelerator is not None and accelerator.num_processes == 1 and device_map == "auto":
-                self._device = torch.device(device)
-                self.device_map = device_map
-            else:
-                self._device = torch.device(f"cuda:{accelerator.local_process_index}")
-                self.device_map = f"cuda:{accelerator.local_process_index}"
+        accelerator_kwargs = InitProcessGroupKwargs(timeout=timedelta(weeks=52))
+        accelerator = Accelerator(kwargs_handlers=[accelerator_kwargs])
+        self.accelerator = accelerator
+        if accelerator.num_processes > 1:
+            self._device = torch.device(f"cuda:{accelerator.local_process_index}")
+            self.device_map = f"cuda:{accelerator.local_process_index}"
+        elif accelerator.num_processes == 1 and device_map == "auto":
+            self._device = torch.device(device)
+            self.device_map = device_map
         else:
-            accelerator = None
-            if device_map == "auto":
-                self._device = torch.device(device)
-                self.device_map = device_map
-            else:
-                self._device = torch.device(f"cuda:{env_local_rank}")
-                self.device_map = f"cuda:{env_local_rank}"
-        
-        print(f"self.device_map: {self.device_map}")
-        self.RANK = int(self.device_map.split(":")[-1])
-        print(f"self.RANK: {self.RANK}")
+            self._device = torch.device(f"cuda:{accelerator.local_process_index}")
+            self.device_map = f"cuda:{accelerator.local_process_index}"
 
         llava_model_args = {
             "multimodal": True,
@@ -189,8 +163,8 @@ class Llava(lmms):
             llava_model_args["customized_config"] = customized_config
         if attn_implementation is not None:
             llava_model_args["attn_implementation"] = attn_implementation
-        if use_flash_attention_2 is not None:
-            llava_model_args["use_flash_attention_2"] = use_flash_attention_2
+        if "use_flash_attention_2" in kwargs:
+            llava_model_args["use_flash_attention_2"] = kwargs["use_flash_attention_2"]
         model_name = model_name if model_name is not None else get_model_name_from_path(pretrained)
         try:
             # Try to load the model with the multimodal argument
@@ -200,19 +174,6 @@ class Llava(lmms):
             llava_model_args.pop("multimodal", None)
             self._tokenizer, self._model, self._image_processor, self._max_length = load_pretrained_model(pretrained, None, model_name, device_map=self.device_map, **llava_model_args)
         self._config = self._model.config
-        patch_llava_model_for_pruning(self.model)
-        self._config.llava_prune_enable = _to_bool(prune)
-        anchor_k = max(1, int(prune_kmin_abs if prune_kmin_abs is not None else prune_anchor_k))
-        self._config.llava_prune_k_total = int(prune_k_total)
-        self._config.llava_prune_anchor_k = anchor_k
-        self._config.llava_prune_kmin_abs = anchor_k
-        self._config.llava_prune_layer_idx = -2
-        self._config.llava_prune_tau = 0.20 if prune_tau is None else float(prune_tau)
-        self._config.llava_prune_patience = 3 if prune_patience is None else int(prune_patience)
-        self._config.llava_prune_patience_mode = "cumulative" if prune_patience_mode is None else str(prune_patience_mode)
-        self._config.llava_prune_kmax_ratio = 0.5 if prune_kmax_ratio is None else float(prune_kmax_ratio)
-        self._config.llava_prune_adaptive_rel = True if prune_adaptive_rel is None else _to_bool(prune_adaptive_rel)
-        self._config.llava_prune_query_text = ""
         self.model.eval()
         if tie_weights:
             self.model.tie_weights()
@@ -223,7 +184,7 @@ class Llava(lmms):
         self.use_cache = use_cache
         self.truncate_context = truncate_context
         # assert self.batch_size_per_gpu == 1, "Llava currently does not support batched generation. See https://github.com/haotian-liu/LLaVA/issues/754. HF Llava also has this issue."
-        if accelerator is not None and accelerator.num_processes > 1:
+        if accelerator.num_processes > 1:
             assert accelerator.distributed_type in [DistributedType.FSDP, DistributedType.MULTI_GPU, DistributedType.DEEPSPEED], "Unsupported distributed type provided. Only DDP and FSDP are supported."
             # If you want to use DistributedType.DEEPSPEED, you have to run accelerate config before using the model
             # Also, you have to select zero stage 0 (equivalent to DDP) in order to make the prepare model works
@@ -245,17 +206,15 @@ class Llava(lmms):
                 eval_logger.info(f"Using {accelerator.num_processes} devices with data parallelism")
             self._rank = self.accelerator.local_process_index
             self._world_size = self.accelerator.num_processes
-        elif accelerator is not None and accelerator.num_processes == 1 and device_map == "auto":
+        elif accelerator.num_processes == 1 and device_map == "auto":
             eval_logger.info(f"Using {accelerator.num_processes} devices with tensor parallelism")
-            self._rank = int(os.environ.get("LOCAL_RANK", "0"))
-            self._world_size = int(os.environ.get("WORLD_SIZE", "1"))
+            self._rank = 0
+            self._world_size = 1
         else:
             eval_logger.info(f"Using single device: {self._device}")
             self.model.to(self._device)
             self._rank = 0
             self._world_size = 1
-        
-        print(f"self._rank: {self._rank}")
 
     @property
     def config(self):
@@ -376,9 +335,6 @@ class Llava(lmms):
             labels = input_ids.clone()
             # Context part no need to calculate for loss
             labels[0, : contxt_id.shape[1]] = -100
-            if bool(getattr(self._config, "llava_prune_enable", False)):
-                self._config.llava_prune_query_text = prompts_input
-
             with torch.inference_mode():
                 outputs = self.model(input_ids=input_ids, labels=labels, images=image, use_cache=True, image_sizes=image_sizes)
             loss = outputs["loss"]
@@ -404,17 +360,6 @@ class Llava(lmms):
         return new_list
 
     def generate_until(self, requests: List[Instance]) -> List[str]:
-        qa = {}
-        default_save_dir = os.path.join(os.getenv("SAVE_LOGS_DIR"), 'eval_logs', 'question_answer_pairs')
-        os.makedirs(default_save_dir, exist_ok=True)
-        QA_ID = str(os.getenv('QA_ID', 0))
-        RANK = self.RANK
-        if not int(os.getenv("LOCAL", 0)):
-            qa = merge_qa_dicts(default_save_dir, QA_ID)
-            print(f"RANK: {RANK} - reading {len(qa)} qa pairs")
-        file_path = os.path.join(default_save_dir, f"qa_{QA_ID}_{RANK}.json")
-        print(f"RANK: {RANK} - os.path.exists(file_path): {os.path.exists(file_path)}")
-
         res = []
 
         def _collate(x):
@@ -433,8 +378,7 @@ class Llava(lmms):
         re_ords = utils.Collator([reg.args for reg in requests], _collate, grouping=True)
         chunks = re_ords.get_batched(n=self.batch_size, batch_fn=None)
         num_iters = len(requests) // self.batch_size if len(requests) % self.batch_size == 0 else len(requests) // self.batch_size + 1
-        # pbar = tqdm(total=num_iters, disable=(self.rank != 0), desc="Model Responding")
-        iter = 0
+        pbar = tqdm(total=num_iters, disable=(self.rank != 0), desc="Model Responding")
         for chunk in chunks:
             contexts, all_gen_kwargs, doc_to_visual, doc_id, task, split = zip(*chunk)
             task = task[0]
@@ -444,17 +388,6 @@ class Llava(lmms):
             # we assume all gen kwargs in the batch are the same
             # this is safe to assume because the `grouper` object ensures it.
             gen_kwargs = all_gen_kwargs[0]
-
-            if flattened_visuals:
-                img_key = image_to_key(flattened_visuals[0])
-            else:
-                img_key = str(doc_id[0])
-            request_key = contexts[0].replace(" ", "_") + "_" + img_key
-
-            if request_key in qa.keys():
-                res.append(qa[request_key])
-                iter += 1
-                continue
 
             # Set default values for until and max_new_tokens
             until = [self.tok_decode(self.eot_token_id)]
@@ -520,11 +453,6 @@ class Llava(lmms):
             if "num_beams" not in gen_kwargs:
                 gen_kwargs["num_beams"] = 1
 
-            if bool(getattr(self._config, "llava_prune_enable", False)):
-                if len(contexts) != 1:
-                    raise ValueError("AnchorPrune requires batch_size=1 during generation to associate each visual input with its corresponding query-specific relevance signal.")
-                self._config.llava_prune_query_text = contexts[0]
-
             input_ids_list = [tokenizer_image_token(prompt, self.tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt") for prompt in question_input]
             pad_token_ids = self.tokenizer.pad_token_id if self.tokenizer.pad_token_id is not None else self.tokenizer.eos_token_id
             input_ids = self.pad_sequence(input_ids_list, batch_first=True, padding_value=pad_token_ids).to(self.device)
@@ -564,21 +492,13 @@ class Llava(lmms):
             #             # ignore '' separator,
             #             # for seq2seq case where self.tok_decode(self.eot_token_id) = ''
             #             text_outputs = text_outputs.split(term)[0]
-            qa[request_key] = text_outputs[0]
-            save_json_file(file_path, qa)
-
             res.extend(text_outputs)
             self.cache_hook.add_partial("generate_until", (context, gen_kwargs), text_outputs)
-
-            if iter % 200 == 0:
-                print(f"RANK: {RANK} - [{iter}/{num_iters}] Model Responding..., output: {text_outputs}")
-
-            iter += 1
-            # pbar.update(1)
+            pbar.update(1)
             # reorder this group of results back to original unsorted form
         res = re_ords.get_original(res)
 
-        # pbar.close()
+        pbar.close()
         return res
 
     def generate_until_multi_round(self, requests) -> List[str]:

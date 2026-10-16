@@ -117,6 +117,9 @@ export REFCOCO_PROMPT_STYLE=full
 
 export PYTHONPATH="${REPO_ROOT}:${LMMS_ROOT}:${PYTHONPATH:-}"
 
+export LLAVA_ROOT="${PROJECTS_DIR}/LLaVA"
+export PYTHONPATH="${LLAVA_ROOT}:${PYTHONPATH}"
+
 echo "[PruneSID] LLaVA-1.5-7B | tasks=${TASKS} | K=${K}"
 cd "${LMMS_ROOT}"
 
@@ -138,17 +141,7 @@ MAIN_PROCESS_IP=$(scontrol show hostnames "$SLURM_NODELIST" | head -n 1)
 MAIN_PROCESS_PORT=29500
 MACHINE_RANK=${SLURM_NODEID}
 
-accelerate launch --num_processes=${GPUS_PER_NODE} -m lmms_eval \
-  --model llava \
-  --model_args pretrained=${MODEL} \
-  --plug_in_model prunesid_llava \
-  --need_token_num $K \
-  --tasks ${TASKS} \
-  --batch_size 1 \
-  --log_samples \
-  --log_samples_suffix pruneSID \
-  --output_path ${SAVE_LOGS_DIR} \
-  ${OPTIONAL_ARGS}
+accelerate launch --num_processes=${GPUS_PER_NODE} -m lmms_eval --model llava --model_args pretrained=${MODEL} --plug_in_model prunesid_llava --need_token_num $K --tasks ${TASKS} --batch_size 1 --log_samples --log_samples_suffix pruneSID --output_path ${SAVE_LOGS_DIR} ${OPTIONAL_ARGS}
 
 
 ################ SBATCH
