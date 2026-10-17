@@ -84,8 +84,9 @@ def load_json_with_fallback(file_path):
     print(f"Recovered {len(data)} valid key/value pairs.")
     return data
 
-def merge_qa_dicts(qa_dir):
-    QA_ID = str(os.getenv("QA_ID", 0))
+def merge_qa_dicts(qa_dir, QA_ID=None):
+    if QA_ID is None:
+        QA_ID = str(os.getenv("QA_ID", 0))
     pattern = os.path.join(qa_dir, f"qa_{QA_ID}_*.json")
     merged = {}
     for file_path in glob.glob(pattern):
