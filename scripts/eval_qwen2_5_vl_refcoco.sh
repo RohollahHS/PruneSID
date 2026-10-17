@@ -77,6 +77,7 @@ source ${VENVS_DIR}/qwen/bin/activate
 K="128"
 TASKS=refcoco,refcoco+,refcocog
 OPTIONAL_ARGS=""
+CANCEL=0
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -90,6 +91,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --a|--args)
       OPTIONAL_ARGS="$2"
+      shift 2
+      ;;
+    --c|--cancel)
+      CANCEL="$2"
       shift 2
       ;;
     *)
@@ -137,6 +142,9 @@ MACHINE_RANK=${SLURM_NODEID}
 
 accelerate launch --num_processes=${GPUS_PER_NODE} -m lmms_eval --model qwen2_5_vl --model_args pretrained=Qwen/Qwen2.5-VL-7B-Instruct,max_pixels=12845056 --plug_in_model prunesid_qwen2_5 --need_token_num $K --tasks ${TASKS} --batch_size 1 --log_samples --log_samples_suffix pruneSID --output_path ${SAVE_LOGS_DIR} ${OPTIONAL_ARGS}
 
+if (( CANCEL == 1 )); then
+  scancel $SLURM_JOB_ID
+fi
 
 ################ SBATCH
 # cat scripts/headers/${HEADER}.sh scripts/eval_qwen2_5_vl_refcoco.sh > myjob.sh
@@ -153,11 +161,17 @@ accelerate launch --num_processes=${GPUS_PER_NODE} -m lmms_eval --model qwen2_5_
 
 ################ INTERACTIVE
 
-# bash ${PROJECTS_DIR}/PruneSID/scripts/eval_qwen2_5_vl_refcoco.sh --k 128 2>&1 | tee "$SLURM_OUTPUTS/PruneSID_qwen_k128_kmin20_refcoco,refcoco+,refcocog.log"
+# bash ${PROJECTS_DIR}/PruneSID/scripts/eval_qwen2_5_vl_refcoco.sh --tasks refcoco --c 1 --k 128 2>&1 | tee "$SLURM_OUTPUTS/PruneSID_qwen_k128_kmin20_refcoco.log"
+# bash ${PROJECTS_DIR}/PruneSID/scripts/eval_qwen2_5_vl_refcoco.sh --tasks refcoco+ --c 1 --k 128 2>&1 | tee "$SLURM_OUTPUTS/PruneSID_qwen_k128_kmin20_refcoco+.log"
+# bash ${PROJECTS_DIR}/PruneSID/scripts/eval_qwen2_5_vl_refcoco.sh --tasks refcocog --c 1 --k 128 2>&1 | tee "$SLURM_OUTPUTS/PruneSID_qwen_k128_kmin20_refcocog.log"
 
-# bash ${PROJECTS_DIR}/PruneSID/scripts/eval_qwen2_5_vl_refcoco.sh --k 256 2>&1 | tee "$SLURM_OUTPUTS/PruneSID_qwen_k256_kmin40_refcoco,refcoco+,refcocog.log"
+# bash ${PROJECTS_DIR}/PruneSID/scripts/eval_qwen2_5_vl_refcoco.sh --tasks refcoco --c 1 --k 256 2>&1 | tee "$SLURM_OUTPUTS/PruneSID_qwen_k256_kmin40_refcoco.log"
+# bash ${PROJECTS_DIR}/PruneSID/scripts/eval_qwen2_5_vl_refcoco.sh --tasks refcoco+ --c 1 --k 256 2>&1 | tee "$SLURM_OUTPUTS/PruneSID_qwen_k256_kmin40_refcoco+.log"
+# bash ${PROJECTS_DIR}/PruneSID/scripts/eval_qwen2_5_vl_refcoco.sh --tasks refcocog --c 1 --k 256 2>&1 | tee "$SLURM_OUTPUTS/PruneSID_qwen_k256_kmin40_refcocog.log"
 
-# bash ${PROJECTS_DIR}/PruneSID/scripts/eval_qwen2_5_vl_refcoco.sh --k 512 2>&1 | tee "$SLURM_OUTPUTS/PruneSID_qwen_k512_kmin80_refcoco,refcoco+,refcocog.log"
+# bash ${PROJECTS_DIR}/PruneSID/scripts/eval_qwen2_5_vl_refcoco.sh --tasks refcoco --c 1 --k 512 2>&1 | tee "$SLURM_OUTPUTS/PruneSID_qwen_k512_kmin80_refcoco.log"
+# bash ${PROJECTS_DIR}/PruneSID/scripts/eval_qwen2_5_vl_refcoco.sh --tasks refcoco+ --c 1 --k 512 2>&1 | tee "$SLURM_OUTPUTS/PruneSID_qwen_k512_kmin80_refcoco+.log"
+# bash ${PROJECTS_DIR}/PruneSID/scripts/eval_qwen2_5_vl_refcoco.sh --tasks refcocog --c 1 --k 512 2>&1 | tee "$SLURM_OUTPUTS/PruneSID_qwen_k512_kmin80_refcocog.log"
 
 ######################
 
