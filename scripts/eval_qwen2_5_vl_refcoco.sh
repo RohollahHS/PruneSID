@@ -141,15 +141,15 @@ accelerate launch --num_processes=${GPUS_PER_NODE} -m lmms_eval --model qwen2_5_
 ################ SBATCH
 # cat scripts/headers/${HEADER}.sh scripts/eval_qwen2_5_vl_refcoco.sh > myjob.sh
 # k=128
-# sbatch --nodes=2 --job-name=${HEADER}_PruneSID_k${k} --time=12:00:00 myjob.sh --k $k
+# sbatch --nodes=1 --job-name=${HEADER}_PruneSID_qwen_k${k} --time=12:00:00 myjob.sh --k $k
 
 # cat scripts/headers/${HEADER}.sh scripts/eval_qwen2_5_vl_refcoco.sh > myjob.sh
 # k=256
-# sbatch --nodes=2 --job-name=${HEADER}_PruneSID_k${k} --time=12:00:00 myjob.sh --k $k
+# sbatch --nodes=1 --job-name=${HEADER}_PruneSID_qwen_k${k} --time=12:00:00 myjob.sh --k $k
 
 # cat scripts/headers/${HEADER}.sh scripts/eval_qwen2_5_vl_refcoco.sh > myjob.sh
 # k=512
-# sbatch --nodes=2 --job-name=${HEADER}_PruneSID_k${k} --time=12:00:00 myjob.sh --k $k
+# sbatch --nodes=1 --job-name=${HEADER}_PruneSID_qwen_k${k} --time=12:00:00 myjob.sh --k $k
 
 ################ INTERACTIVE
 
@@ -163,3 +163,9 @@ accelerate launch --num_processes=${GPUS_PER_NODE} -m lmms_eval --model qwen2_5_
 
 # k=512
 # bash ${PROJECTS_DIR}/PruneSID/recursive_interactive_eval.sh --k $k
+
+
+# source /scratch/rohhs/venvs/voco/bin/activate
+# pip install openai hf_transfer
+# source /scratch/rohhs/venvs/qwen/bin/activate
+# pip install openai hf_transfer
